@@ -93,11 +93,11 @@ module imm_gen (
 
     always @(*) begin
         case (opcode)
-            7'b0000011,  // Tipo I: lh
-            7'b0010011:  // Tipo I: andi
+            7'b0000011,  // Tipo I: lb
+            7'b0010011:  // Tipo I: ori
                 imm_out = {{20{instr[31]}}, instr[31:20]}; // sinal estendido
 
-            7'b0100011: begin  // Tipo S: sh
+            7'b0100011: begin  // Tipo S: sb
                 imm_s = {instr[31:25], instr[11:7]};
                 imm_out = {{20{imm_s[11]}}, imm_s};
             end
@@ -107,7 +107,7 @@ module imm_gen (
                 imm_out = {{19{imm_b[12]}}, imm_b};
             end
 
-            7'b0110011:  // Tipo R: sub, or, srl
+            7'b0110011:  // Tipo R: sub, and, srl
                 imm_out = 32'b0;  // sem imediato
 
             default:
@@ -141,7 +141,7 @@ module control (
         alu_op      = 2'b00;
 
         case (opcode)
-            7'b0000011: begin // LH (Load Halfword)
+            7'b0000011: begin // LB 
                 reg_write   = 1;  // Habilita escrita no registrador
                 alu_src     = 1;  // ALU recebe imediato (offset)
                 mem_to_reg  = 1;  // Dados vêm da memória
@@ -150,7 +150,7 @@ module control (
                 branch      = 0;
                 alu_op      = 2'b00; // ALU faz ADD para calcular endereço
             end
-            7'b0100011: begin // SH (Store Halfword)
+            7'b0100011: begin // SB 
                 reg_write   = 0;
                 alu_src     = 1;  // Imediato para offset
                 mem_to_reg  = 0;
@@ -168,7 +168,7 @@ module control (
                 branch      = 1;  // Ativa desvio condicional
                 alu_op      = 2'b01; // ALU faz SUB para comparação
             end
-            7'b0110011: begin // R-type (SUB, OR, SRL)
+            7'b0110011: begin // R-type (SUB, AND, SRL)
                 reg_write   = 1;  // Habilita escrita no registrador
                 alu_src     = 0;  // Segundo operando é registrador
                 mem_to_reg  = 0;  // Resultado da ALU vai para o registrador
@@ -177,7 +177,7 @@ module control (
                 branch      = 0;
                 alu_op      = 2'b10; // ALU control depende de funct3/funct7
             end
-            7'b0010011: begin // I-type (ANDI, SRLI)
+            7'b0010011: begin // I-type (ANDI, ORI , SRLI)
                 reg_write   = 1;  // Habilita escrita no registrador
                 alu_src     = 1;  // Segundo operando é imediato
                 mem_to_reg  = 0;
@@ -225,36 +225,37 @@ module alu_control (
     input [1:0] alu_op,
     input [2:0] funct3,
     input [6:0] funct7,
-    output reg [3:0] alu_control
+    output reg [3:0] alu_ctrl
 );
     always @(*) begin
         case (alu_op)
-            2'b00: alu_control = 4'b0010; // Load/Store: ADD
-            2'b01: alu_control = 4'b0110; // BEQ: SUB
+            2'b00: alu_ctrl = 4'b0010; // Load/Store: ADD
+            2'b01: alu_ctrl = 4'b0110; // BEQ: SUB
             2'b10: begin // R-type
                 case ({funct7, funct3})
-                    10'b0000000000: alu_control = 4'b0010; // ADD
-                    10'b0100000000: alu_control = 4'b0110; // SUB
-                    10'b0000000110: alu_control = 4'b0001; // OR
-                    10'b0000000101: alu_control = 4'b0011; // SRL
-                    10'b0000000111: alu_control = 4'b0000; // AND
-                    default:        alu_control = 4'b0000; // Default: AND
+                    10'b0000000000: alu_ctrl = 4'b0010; // ADD
+                    10'b0100000000: alu_ctrl = 4'b0110; // SUB
+                    10'b0000000110: alu_ctrl = 4'b0001; // OR (extra)
+                    10'b0000000101: alu_ctrl = 4'b0011; // SRL
+                    10'b0000000111: alu_ctrl = 4'b0000; // AND
+                    default:        alu_ctrl = 4'b0000; // Default: AND
                 endcase
             end
             2'b11: begin // I-type
                 case (funct3)
-                    3'b000: alu_control = 4'b0010; // ADDI
-                    3'b111: alu_control = 4'b0000; // ANDI
+                    3'b000: alu_ctrl = 4'b0010; // ADDI
+                    3'b110: alu_ctrl = 4'b0001; // ORI
+
                     3'b101: begin
                         if (funct7 == 7'b0000000)
-                            alu_control = 4'b0011; // SRLI
+                            alu_ctrl = 4'b0011; // SRLI
                         else
-                            alu_control = 4'b0000; // SRAI não implementado
+                            alu_ctrl = 4'b0000;
                     end
-                    default: alu_control = 4'b0000;
+                    default: alu_ctrl = 4'b0000;
                 endcase
             end
-            default: alu_control = 4'b0000;
+            default: alu_ctrl = 4'b0000;
         endcase
     end
 endmodule
@@ -269,9 +270,9 @@ module alu (
 );
     always @(*) begin
         case (alu_control)
-            4'b0000: result = a & b;       // AND / ANDI
+            4'b0000: result = a & b;       // AND 
             4'b0001: result = a | b;       // OR
-            4'b0010: result = a + b;       // ADD (LH/SH)
+            4'b0010: result = a + b;       // ADD (LB/SB/ADDI)
             4'b0110: result = a - b;       // SUB / BEQ
             4'b0011: result = a >> b[4:0]; // SRL
             default: result = 0;
@@ -290,7 +291,7 @@ module data_memory(
   input [7:0] addr,
   input [31:0] write_data,
   input memWrite,
-  input memRead,          // NOVO: controle para leitura
+  input memRead,
   output reg [31:0] read_data
 );
 
@@ -298,31 +299,22 @@ module data_memory(
   integer i;
 
   initial begin
-    for(i = 0; i < 256; i = i + 1) begin
+    for(i = 0; i < 256; i = i + 1)
       memory[i] = 8'b0;
-    end
   end
 
-  // Escrita na memória (síncrona)
+  // SB
   always @(posedge clk) begin
-    if (memWrite) begin
-      if (addr < 255) begin
-        memory[addr] <= write_data[7:0];
-        memory[addr + 1] <= write_data[15:8];
-      end
-    end
+    if(memWrite)
+      memory[addr] <= write_data[7:0];
   end
 
-  // Leitura combinacional (controlada por memRead)
+  // LB
   always @(*) begin
-    if (memRead && addr < 255) begin
-      read_data[7:0] = memory[addr];
-      read_data[15:8] = memory[addr + 1];
-      // Para completar os 32 bits, sinal estendido a partir do bit 7 do byte mais alto
-      read_data[31:16] = {16{memory[addr + 1][7]}};
-    end else begin
+    if(memRead)
+      read_data = {{24{memory[addr][7]}}, memory[addr]};
+    else
       read_data = 32'b0;
-    end
   end
 
 endmodule
@@ -436,7 +428,7 @@ module cpu_top (
     .alu_op(alu_op),
     .funct3(instruction[14:12]),
     .funct7(instruction[31:25]),
-    .alu_control(alu_op_code)
+    .alu_ctrl(alu_op_code)
   );
 
   // Instancia ALU

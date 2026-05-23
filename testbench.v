@@ -1,4 +1,3 @@
-`include "main.v"
 `timescale 1ns/1ps
 
 module testbench;
@@ -35,12 +34,10 @@ module testbench;
   
   // Após algumas instruções, imprime registradores
   initial begin
-    #150; // tempo para várias instruções executarem
+    #150;
 
     $display("\nRegistradores (0 a 31):");
     for (i = 0; i < 32; i = i + 1) begin
-      // Aqui acessamos o vetor interno dos registradores
-      // Usa função $display para imprimir
       $display("reg[%0d] = %d", i, dut.registers_inst.registers[i]);
     end
 
